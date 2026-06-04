@@ -110,25 +110,18 @@ async def _handle_prayer(message: types.Message, fallback_lang: str):
     user_id = message.from_user.id
     lang = await db.get_user_lang(user_id) or fallback_lang
 
-    # Lokatsiyani tekshirish
     location = await db.get_user_location(user_id)
+    is_default = False
     if not location:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(
-                text=LOC_BTN.get(lang, LOC_BTN["uz"]),
-                request_location=True
-            )]],
-            resize_keyboard=True,
-            one_time_keyboard=True,
-        )
-        await message.answer(
-            NO_LOC_TEXT.get(lang, NO_LOC_TEXT["uz"]),
-            reply_markup=kb
-        )
-        return
+        # Default: Toshkent
+        lat, lon = 41.2995, 69.2401
+        is_default = True
+    else:
+        lat, lon = location
 
-    lat, lon = location
-    wait_msg = await message.answer("⏳ Namoz vaqtlari yuklanmoqda...")
+    wait_msg = await message.answer(
+        "⏳ Namoz vaqtlari yuklanmoqda..." if lang == "uz" else "⏳ Загрузка времени намаза..."
+    )
 
     # Keshdan tekshirish
     coord_key = f"{round(lat, 5)},{round(lon, 5)}"
@@ -142,28 +135,44 @@ async def _handle_prayer(message: types.Message, fallback_lang: str):
         timings, meta = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
         if not timings:
             await wait_msg.edit_text(
-                "❌ Namoz vaqtlarini olishda xatolik yuz berdi.\n"
-                "Iltimos, qayta urinib ko'ring."
+                "❌ Namoz vaqtlarini olishda xatolik yuz berdi.\nIltimos, qayta urinib ko'ring." if lang == "uz" else
+                "❌ Произошла ошибка при получении времени намаза.\nПожалуйста, попробуйте еще раз."
             )
             return
         await db.upsert_prayer_cache(coord_key, today_str, timings)
 
-        # UTC offset ni saqlash (masalan: "Asia/Tashkent" → +5)
-        try:
-            tz_str = meta.get("timezone", "")
-            if tz_str:
-                import zoneinfo
-                from datetime import timezone
-                tz = zoneinfo.ZoneInfo(tz_str)
-                offset_seconds = datetime.now(tz).utcoffset().total_seconds()
-                offset_hours   = int(offset_seconds // 3600)
-                await db.set_utc_offset(user_id, offset_hours)
-        except Exception:
-            pass
+        # UTC offset ni saqlash (faqat default bo'lmaganda)
+        if not is_default:
+            try:
+                tz_str = meta.get("timezone", "")
+                if tz_str:
+                    import zoneinfo
+                    from datetime import timezone
+                    tz = zoneinfo.ZoneInfo(tz_str)
+                    offset_seconds = datetime.now(tz).utcoffset().total_seconds()
+                    offset_hours   = int(offset_seconds // 3600)
+                    await db.set_utc_offset(user_id, offset_hours)
+            except Exception:
+                pass
 
     # Oxirgi faollikni yangilash
     await db.update_last_active(user_id)
 
     # Javob yuborish
     text = _format_prayer_msg(timings, lang)
+    if is_default:
+        if lang == "uz":
+            text = (
+                "⚠️ <b>Siz hali joylashuvingizni ulashmagansiz.</b>\n"
+                "Toshkent shahri uchun namoz vaqtlari ko'rsatilmoqda.\n"
+                "O'z joylashuvingizni yuborish uchun <b>📍 Yaqin masjidlarni topish</b> tugmasini bosing.\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n" + text
+            )
+        else:
+            text = (
+                "⚠️ <b>Вы еще не поделились геопозицией.</b>\n"
+                "Показано время намаза для Ташкента.\n"
+                "Чтобы отправить свою геопозицию, нажмите кнопку <b>📍 Найти ближайшие мечети</b>.\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n" + text
+            )
     await wait_msg.edit_text(text)

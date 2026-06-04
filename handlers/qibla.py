@@ -78,23 +78,14 @@ async def _handle_qibla(message: types.Message):
     user_id  = message.from_user.id
     lang     = await db.get_user_lang(user_id) or "uz"
     location = await db.get_user_location(user_id)
+    is_default = False
 
     if not location:
-        loc_text = (
-            "📍 <b>Qibla yo'nalishini topish uchun</b>\n\nAvval lokatsiyangizni yuboring:"
-            if lang == "uz" else
-            "📍 <b>Для определения направления Киблы</b>\n\nСначала отправьте геолокацию:"
-        )
-        btn_text = "📍 Lokatsiyamni yuborish" if lang == "uz" else "📍 Отправить геолокацию"
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=btn_text, request_location=True)]],
-            resize_keyboard=True,
-            one_time_keyboard=True,
-        )
-        await message.answer(loc_text, reply_markup=kb)
-        return
+        lat, lon = 41.2995, 69.2401
+        is_default = True
+    else:
+        lat, lon = location
 
-    lat, lon = location
     bearing  = calculate_qibla(lat, lon)
     arrow, name_uz, short = bearing_info(bearing)
     compass  = draw_compass(bearing)
@@ -110,7 +101,24 @@ async def _handle_qibla(message: types.Message):
         f"<b>{arrow} 🕋 Ka'ba tomonga yuzlaning: {name_uz}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "📡 <i>Makka Mukarrama koordinatalari\n"
-        "    (21.4225°N, 39.8262°E) asosida</i>"
+        "    (21.4225°N, 39.8262°E) va joylashuvingiz asosida</i>"
     )
+
+    if is_default:
+        if lang == "uz":
+            text = (
+                "⚠️ <b>Siz hali joylashuvingizni ulashmagansiz.</b>\n"
+                "Toshkent shahri uchun Qibla yo'nalishi ko'rsatilmoqda.\n"
+                "O'z joylashuvingizni yuborish uchun <b>📍 Yaqin masjidlarni topish</b> tugmasini bosing.\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n" + text
+            )
+        else:
+            text = (
+                "⚠️ <b>Вы еще не поделились геопозицией.</b>\n"
+                "Показано направление Киблы для Ташкента.\n"
+                "Чтобы отправить свою геопозицию, нажмите кнопку <b>📍 Найти ближайшие мечети</b>.\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n" + text
+            )
+
     await message.answer(text)
     await db.update_last_active(user_id)
