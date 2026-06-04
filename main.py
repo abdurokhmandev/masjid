@@ -6,7 +6,7 @@ from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
 from database.db import init_db
-from handlers import start, location, admin
+from handlers import start, location, admin, settings, qibla, prayer, fallback
 
 load_dotenv()
 
@@ -26,6 +26,10 @@ async def main():
     dp.include_router(admin.router)
     dp.include_router(start.router)
     dp.include_router(location.router)
+    dp.include_router(settings.router)
+    dp.include_router(qibla.router)
+    dp.include_router(prayer.router)
+    dp.include_router(fallback.router)
 
     logging.info("Professional Masjid Bot ishga tushdi... ✅")
     await dp.start_polling(bot)

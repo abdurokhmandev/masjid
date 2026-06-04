@@ -1,8 +1,11 @@
 from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import db
+import logging
 
 router = Router()
+
+
 
 # Helper to build settings keyboard
 def settings_keyboard(notifications_enabled: bool, daily_report_enabled: bool):
@@ -14,15 +17,19 @@ def settings_keyboard(notifications_enabled: bool, daily_report_enabled: bool):
         [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_settings")]
     ])
 
-@router.message(F.text == "⚙ Sozlamalar")
+@router.message(F.text.strip() == "⚙ Sozlamalar")
 async def open_settings(message: types.Message):
+    logging.info("Sozlamalar tugmasi bosildi – user_id=%s", message.from_user.id)
     user_id = message.from_user.id
     settings = await db.get_user_settings(user_id)
     kb = settings_keyboard(settings["notifications"], settings["daily_report"])
     await message.answer("🛠 Sozlamalar:", reply_markup=kb)
 
+
+
 @router.callback_query(F.data == "toggle_notifications")
 async def toggle_notifications(callback: types.CallbackQuery):
+    logging.info("toggle_notifications callback – user_id=%s", callback.from_user.id)
     user_id = callback.from_user.id
     settings = await db.get_user_settings(user_id)
     await db.set_notifications(user_id, not settings["notifications"])
@@ -33,6 +40,7 @@ async def toggle_notifications(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "toggle_daily_report")
 async def toggle_daily_report(callback: types.CallbackQuery):
+    logging.info("toggle_daily_report callback – user_id=%s", callback.from_user.id)
     user_id = callback.from_user.id
     settings = await db.get_user_settings(user_id)
     await db.set_daily_report(user_id, not settings["daily_report"])
