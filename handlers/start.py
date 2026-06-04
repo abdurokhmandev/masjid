@@ -1,61 +1,96 @@
 from aiogram import Router, types, F
 from aiogram.filters import CommandStart
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton,
+)
 from database import db
 
 router = Router()
 
+# ──────────────────────────────────────────────
+# Matnlar
+# ──────────────────────────────────────────────
+
 TEXTS = {
     "uz": {
-        "welcome": "🕌 <b>Masjid Finder Botiga xush kelibsiz!</b>\n\nAtrofingizdagi eng yaqin masjidlarni topish uchun lokatsiyangizni yuboring.",
-        "btn_loc": "📍 Yaqin masjidlarni topish",
+        "welcome": (
+            "🕌 <b>Masjid Finder Botga xush kelibsiz!</b>\n\n"
+            "Atrofingizdagi eng yaqin masjidlarni topish,\n"
+            "namoz vaqtlarini bilish va Qibla yo'nalishini\n"
+            "aniqlash uchun pastdagi tugmalardan foydalaning. 👇"
+        ),
+        "btn_loc":    "📍 Yaqin masjidlarni topish",
+        "btn_prayer": "🕌 Namoz vaqtlari",
+        "btn_qibla":  "🧭 Qibla yo'nalishi",
+        "btn_sett":   "⚙️ Sozlamalar",
     },
     "ru": {
-        "welcome": "🕌 <b>Добро пожаловать в Masjid Finder Bot!</b>\n\nЧтобы найти ближайшие мечети, отправьте свою геолокацию.",
-        "btn_loc": "📍 Найти ближайшие мечети",
-    }
+        "welcome": (
+            "🕌 <b>Добро пожаловать в Masjid Finder Bot!</b>\n\n"
+            "Используйте кнопки ниже, чтобы найти мечети,\n"
+            "узнать время намаза и определить направление Киблы. 👇"
+        ),
+        "btn_loc":    "📍 Найти ближайшие мечети",
+        "btn_prayer": "🕌 Время намаза",
+        "btn_qibla":  "🧭 Направление Киблы",
+        "btn_sett":   "⚙️ Настройки",
+    },
 }
 
-def main_menu_keyboard(lang: str):
+# ──────────────────────────────────────────────
+# Klaviatura
+# ──────────────────────────────────────────────
+
+def main_menu(lang: str) -> ReplyKeyboardMarkup:
+    t = TEXTS.get(lang, TEXTS["uz"])
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=TEXTS[lang]["btn_loc"], request_location=True)],
-            [KeyboardButton(text="⚙ Sozlamalar")],
-            [KeyboardButton(text="🧭 Qibla yo'nalishi")]
+            [KeyboardButton(text=t["btn_loc"], request_location=True)],
+            [KeyboardButton(text=t["btn_prayer"]), KeyboardButton(text=t["btn_qibla"])],
+            [KeyboardButton(text=t["btn_sett"])],
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
     )
+
+# ──────────────────────────────────────────────
+# /start
+# ──────────────────────────────────────────────
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
-    # Avval bazadan tilni tekshiramiz
-    lang = await db.get_user_lang(message.from_user.id)
-    
+    user_id = message.from_user.id
+    lang    = await db.get_user_lang(user_id)
+
     if lang:
-        # Agar til tanlangan bo'lsa, srazu menyuni chiqaramiz
-        await message.answer(
-            TEXTS[lang]["welcome"],
-            reply_markup=main_menu_keyboard(lang)
-        )
+        # Til tanlangan → menyuni ko'rsatish
+        await db.update_last_active(user_id)
+        await message.answer(TEXTS[lang]["welcome"], reply_markup=main_menu(lang))
     else:
-        # Agar mutlaqo yangi user bo'lsa, bazaga qo'shib tilni so'raymiz
-        await db.add_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang_uz"),
-                InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru")
-            ]
-        ])
-        await message.answer("🇺🇿 Iltimos, tilni tanlang / 🇷🇺 Пожалуйста, выберите язык:", reply_markup=keyboard)
+        # Yangi foydalanuvchi → bazaga qo'shib til so'rash
+        await db.add_user(user_id, message.from_user.username, message.from_user.full_name)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang_uz"),
+            InlineKeyboardButton(text="🇷🇺 Русский",   callback_data="lang_ru"),
+        ]])
+        await message.answer(
+            "🌐 Iltimos, tilni tanlang:\n🌐 Пожалуйста, выберите язык:",
+            reply_markup=kb
+        )
+
+# ──────────────────────────────────────────────
+# Til tanlash callback
+# ──────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("lang_"))
 async def select_lang(callback: types.CallbackQuery):
-    lang = callback.data.split("_")[1]
-    await db.set_language(callback.from_user.id, lang)
-    
+    lang = callback.data.split("_")[1]   # "uz" yoki "ru"
+    user_id = callback.from_user.id
+    await db.set_language(user_id, lang)
+    await db.update_last_active(user_id)
     await callback.message.delete()
     await callback.message.answer(
         TEXTS[lang]["welcome"],
-        reply_markup=main_menu_keyboard(lang)
+        reply_markup=main_menu(lang)
     )
+    await callback.answer()

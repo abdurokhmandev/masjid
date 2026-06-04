@@ -2,137 +2,167 @@ import asyncio
 import logging
 import requests
 from aiogram import Router, types, F
-from geopy.distance import geodesic
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from geopy.distance import geodesic
 from database import db
 
 router = Router()
 
+# ──────────────────────────────────────────────
+# Matnlar
+# ──────────────────────────────────────────────
+
 LOC_TEXTS = {
     "uz": {
-        "searching": "🔄 Atrofingizdan masjidlar va namoz vaqtlari qidirilmoqda...",
-        "not_found": "⚠️ Afsuski, 5 km radius ichida masjid topilmadi.",
-        "p_times": "📅 <b>Bugungi namoz vaqtlari:</b>",
-        "mosques_title": "\n🕌 <b>Yaqin atrofdagi masjidlar:</b>\n",
-        "distance": "Masofa:",
-        "address": "Manzil:",
-        "error": "❌ Qidiruvda xatolik yuz berdi. Qayta urinib ko'ring."
+        "searching":     "🔄 Atrofingizdan masjidlar qidirilmoqda...",
+        "not_found":     "⚠️ Afsuski, 5 km radius ichida masjid topilmadi.",
+        "mosques_title": "🕌 <b>Yaqin atrofdagi masjidlar:</b>",
+        "distance":      "Masofa",
+        "address":       "Manzil",
+        "route_btn":     "🗺 Yo'l ko'rsatish",
+        "error":         "❌ Qidiruvda xatolik yuz berdi. Qayta urinib ko'ring.",
+        "prayer_hint":   "🕌 Namoz vaqtlarini ko'rish uchun pastdagi tugmani bosing.",
     },
     "ru": {
-        "searching": "🔄 Ищу мечети и время намаза поблизости...",
-        "not_found": "⚠️ К сожалению, в радиусе 5 км мечетей не найдено.",
-        "p_times": "📅 <b>Время намаза на сегодня:</b>",
-        "mosques_title": "\n🕌 <b>Ближайшие мечети:</b>\n",
-        "distance": "Расстояние:",
-        "address": "Адрес:",
-        "error": "❌ Произошла ошибка при поиске. Попробуйте еще раз."
-    }
+        "searching":     "🔄 Ищу ближайшие мечети...",
+        "not_found":     "⚠️ К сожалению, в радиусе 5 км мечетей не найдено.",
+        "mosques_title": "🕌 <b>Ближайшие мечети:</b>",
+        "distance":      "Расстояние",
+        "address":       "Адрес",
+        "route_btn":     "🗺 Маршрут",
+        "error":         "❌ Произошла ошибка при поиске. Попробуйте ещё раз.",
+        "prayer_hint":   "🕌 Нажмите кнопку ниже, чтобы увидеть время намаза.",
+    },
 }
 
-# Namoz vaqtlarini olish funksiyasi
-def get_prayer_times(lat: float, lon: float) -> dict:
-    try:
-        url = f"https://api.aladhan.com/v1/timings?latitude={lat}&longitude={lon}&method=3"
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            return r.json().get("data", {}).get("timings", {})
-    except Exception as e:
-        logging.error(f"Namoz vaqtlarini olishda xato: {e}")
-    return {}
+# ──────────────────────────────────────────────
+# API
+# ──────────────────────────────────────────────
 
-def search_mosques_osm(lat: float, lon: float, radius_meters: int = 5000) -> list:
-    servers = ["https://overpass-api.de/api/interpreter", "https://lz4.overpass-api.de/api/interpreter"]
+def _search_mosques(lat: float, lon: float, radius: int = 5000) -> list:
+    """OpenStreetMap Overpass API orqali masjidlarni izlash."""
+    servers = [
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+    ]
     query = (
         f"[out:json][timeout:15];"
         f"("
-        f'node["amenity"="place_of_worship"]["religion"="muslim"](around:{radius_meters},{lat},{lon});'
-        f'way["amenity"="place_of_worship"]["religion"="muslim"](around:{radius_meters},{lat},{lon});'
+        f'node["amenity"="place_of_worship"]["religion"="muslim"](around:{radius},{lat},{lon});'
+        f'way["amenity"="place_of_worship"]["religion"="muslim"](around:{radius},{lat},{lon});'
         f");"
         f"out center;"
     )
     for url in servers:
         try:
-            r = requests.post(url, data={"data": query}, headers={"User-Agent": "MasjidFinderPro/3.0"}, timeout=12)
-            if r.status_code == 200: return r.json().get("elements", [])
-        except: pass
+            r = requests.post(
+                url,
+                data={"data": query},
+                headers={"User-Agent": "MasjidFinderPro/4.0"},
+                timeout=12,
+            )
+            if r.status_code == 200:
+                return r.json().get("elements", [])
+        except Exception as e:
+            logging.warning(f"[location] Overpass xato: {e}")
     return []
+
+# ──────────────────────────────────────────────
+# Location handler
+# ──────────────────────────────────────────────
 
 @router.message(F.location)
 async def handle_location(message: types.Message):
-    lang = await db.get_user_lang(message.from_user.id) or "uz"
-    wait_msg = await message.answer(LOC_TEXTS[lang]["searching"])
-
+    user_id  = message.from_user.id
+    lang     = await db.get_user_lang(user_id) or "uz"
+    T        = LOC_TEXTS[lang]
     user_lat = message.location.latitude
     user_lon = message.location.longitude
-    # Store location in DB
-    await db.update_user_location(message.from_user.id, user_lat, user_lon)
-    
+
+    # Lokatsiyani saqlash
+    await db.update_user_location(user_id, user_lat, user_lon)
+    await db.update_last_active(user_id)
+
+    wait_msg = await message.answer(T["searching"])
+
     try:
-        # Namoz vaqtlari va masjidlarni parallel ravishda chaqiramiz
-        p_times, elements = await asyncio.gather(
-            asyncio.to_thread(get_prayer_times, user_lat, user_lon),
-            asyncio.to_thread(search_mosques_osm, user_lat, user_lon)
-        )
-        
-        # 1. Namoz vaqtlarini formatlash
-        response_text = ""
-        if p_times:
-            response_text += (
-                f"{LOC_TEXTS[lang]['p_times']}\n"
-                f"🔹 Bomdod: <code>{p_times.get('Fajr')}</code> | Quyosh: <code>{p_times.get('Sunrise')}</code>\n"
-                f"🔹 Peshin: <code>{p_times.get('Dhuhr')}</code> | Asr: <code>{p_times.get('Asr')}</code>\n"
-                f"🔹 Shom: <code>{p_times.get('Maghrib')}</code> | Xufton: <code>{p_times.get('Isha')}</code>\n"
-                f"═══════════════════════\n"
-            )
+        # Masjidlarni izlash
+        elements = await asyncio.to_thread(_search_mosques, user_lat, user_lon)
 
         if not elements:
-            await wait_msg.edit_text(response_text + LOC_TEXTS[lang]["not_found"])
+            await wait_msg.edit_text(T["not_found"])
             return
 
-        # 2. Masjidlarni saralash
-        mosques = []
-        seen_coordinates = set()
+        # ── Masjidlarni saralash ──────────────────
+        mosques, seen = [], set()
         for el in elements:
             tags = el.get("tags", {})
-            name = tags.get(f"name:{lang}") or tags.get("name") or tags.get("name:uz") or "Masjid"
+            name = (
+                tags.get(f"name:{lang}")
+                or tags.get("name")
+                or tags.get("name:uz")
+                or ("Masjid" if lang == "uz" else "Мечеть")
+            )
             lat = el.get("lat") or el.get("center", {}).get("lat")
             lon = el.get("lon") or el.get("center", {}).get("lon")
-            
-            if not lat or not lon: continue
-            coord_key = (round(lat, 5), round(lon, 5))
-            if coord_key in seen_coordinates: continue
-            seen_coordinates.add(coord_key)
+            if not (lat and lon):
+                continue
+            key = (round(lat, 5), round(lon, 5))
+            if key in seen:
+                continue
+            seen.add(key)
 
-            addr_parts = [tags.get("addr:city"), tags.get("addr:street"), tags.get("addr:housenumber")]
-            address = ", ".join(filter(None, addr_parts))
+            dist_km  = geodesic((user_lat, user_lon), (lat, lon)).km
+            dist_str = (
+                f"{int(dist_km * 1000)} m"
+                if dist_km < 1.0
+                else f"{dist_km:.2f} km"
+            )
+            addr_parts = filter(None, [
+                tags.get("addr:city"),
+                tags.get("addr:street"),
+                tags.get("addr:housenumber"),
+            ])
+            mosques.append({
+                "name": name, "lat": lat, "lon": lon,
+                "dist": dist_km, "dist_str": dist_str,
+                "address": ", ".join(addr_parts),
+            })
 
-            dist = geodesic((user_lat, user_lon), (lat, lon)).km
-            dist_str = f"{int(dist * 1000)} m" if dist < 1.0 else f"{dist:.2f} km"
+        top3 = sorted(mosques, key=lambda x: x["dist"])[:3]
 
-            mosques.append({"name": name, "address": address, "lat": lat, "lon": lon, "dist": dist, "dist_str": dist_str})
-
-        sorted_mosques = sorted(mosques, key=lambda x: x["dist"])[:3]
-
-        # 3. Bloklarni birlashtirish
-        response_text += LOC_TEXTS[lang]["mosques_title"]
-        response_text += "──────────────────\n"
-        
-        inline_keyboard = []
+        # ── Javob matni ──────────────────────────
         emojis = ["1️⃣", "2️⃣", "3️⃣"]
+        text   = T["mosques_title"] + "\n━━━━━━━━━━━━━━━━━━━━\n"
+        buttons = []
 
-        for i, mosque in enumerate(sorted_mosques):
-            response_text += f"\n{emojis[i]} <b>{mosque['name']}</b>\n"
-            response_text += f"└ 📏 {LOC_TEXTS[lang]['distance']} <b>{mosque['dist_str']}</b>\n"
-            if mosque['address']:
-                response_text += f"└ 📍 {LOC_TEXTS[lang]['address']} <code>{mosque['address']}</code>\n"
-            response_text += "──────────────────\n"
-            
-            google_maps_url = f"https://www.google.com/maps/dir/?api=1&origin={user_lat},{user_lon}&destination={mosque['lat']},{mosque['lon']}&travelmode=walking"
-            inline_keyboard.append([InlineKeyboardButton(text=f"🗺 {emojis[i]} {mosque['name']}", url=google_maps_url)])
+        for i, m in enumerate(top3):
+            text += (
+                f"\n{emojis[i]} <b>{m['name']}</b>\n"
+                f"└ 📏 {T['distance']}: <b>{m['dist_str']}</b>\n"
+            )
+            if m["address"]:
+                text += f"└ 📍 {T['address']}: <code>{m['address']}</code>\n"
+            text += "──────────────────\n"
+
+            gmaps = (
+                f"https://www.google.com/maps/dir/?api=1"
+                f"&origin={user_lat},{user_lon}"
+                f"&destination={m['lat']},{m['lon']}"
+                f"&travelmode=walking"
+            )
+            buttons.append([InlineKeyboardButton(
+                text=f"{T['route_btn']} {emojis[i]} {m['name'][:20]}",
+                url=gmaps,
+            )])
 
         await wait_msg.delete()
-        await message.answer(response_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_keyboard), disable_web_page_preview=True)
+        await message.answer(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            disable_web_page_preview=True,
+        )
 
     except Exception as e:
-        logging.error(f"Xatolik: {e}")
-        await wait_msg.edit_text(LOC_TEXTS[lang]["error"])
+        logging.error(f"[location] Xatolik: {e}")
+        await wait_msg.edit_text(T["error"])

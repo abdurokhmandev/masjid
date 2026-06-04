@@ -1,14 +1,31 @@
 from aiogram import Router, types
+from database import db
 
 router = Router()
 
 @router.message()
 async def unknown_message(message: types.Message):
-    """Handle any text that doesn't match other handlers."""
-    help_text = (
-        "👋 Salom! Iltimos, quyidagi variantlardan birini tanlang:\n"
-        "📍 Yaqin masjidlarni topish\n"
-        "⚙ Sozlamalar\n"
-        "🧭 Qibla yo'nalishi"
-    )
-    await message.answer(help_text, parse_mode="HTML")
+    """Hech qanday boshqa handlerga mos kelmagan xabarlar."""
+    lang = await db.get_user_lang(message.from_user.id) or "uz"
+
+    if lang == "ru":
+        text = (
+            "🤷 Не удалось распознать команду.\n\n"
+            "Используйте кнопки меню:\n"
+            "📍 Найти ближайшие мечети\n"
+            "🕌 Время намаза\n"
+            "🧭 Направление Киблы\n"
+            "⚙️ Настройки\n\n"
+            "Или нажмите /start для перезапуска."
+        )
+    else:
+        text = (
+            "🤷 Buyruq aniqlanmadi.\n\n"
+            "Quyidagi menyu tugmalaridan foydalaning:\n"
+            "📍 Yaqin masjidlarni topish\n"
+            "🕌 Namoz vaqtlari\n"
+            "🧭 Qibla yo'nalishi\n"
+            "⚙️ Sozlamalar\n\n"
+            "Yoki /start bosing."
+        )
+    await message.answer(text)

@@ -1,12 +1,169 @@
-from aiogram import Router, types
+import asyncio
+import logging
+import requests
+from datetime import datetime
+from aiogram import Router, types, F
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from database import db
 
 router = Router()
 
-# Placeholder for future prayer‑related commands.
-# Currently the location handler returns prayer times, so this file can stay empty.
-# You can later add commands like /today, /tomorrow, etc.
+# ──────────────────────────────────────────────
+# Namoz nomlari (UZ / RU)
+# ──────────────────────────────────────────────
 
-@router.message()
-async def placeholder(message: types.Message):
-    # No operation – prevents import errors.
-    return
+PRAYER_LABELS = {
+    "uz": {
+        "Fajr":    "🌙 Bomdod",
+        "Sunrise": "🌅 Quyosh chiqishi",
+        "Dhuhr":   "☀️  Peshin",
+        "Asr":     "🌤  Asr",
+        "Maghrib": "🌆 Shom",
+        "Isha":    "🌃 Xufton",
+    },
+    "ru": {
+        "Fajr":    "🌙 Фаджр",
+        "Sunrise": "🌅 Восход солнца",
+        "Dhuhr":   "☀️  Зухр",
+        "Asr":     "🌤  Аср",
+        "Maghrib": "🌆 Магриб",
+        "Isha":    "🌃 Иша",
+    },
+}
+
+NO_LOC_TEXT = {
+    "uz": (
+        "📍 <b>Namoz vaqtlarini ko'rish uchun</b>\n\n"
+        "Avval lokatsiyangizni yuboring:"
+    ),
+    "ru": (
+        "📍 <b>Для получения времени намаза</b>\n\n"
+        "Сначала отправьте свою геолокацию:"
+    ),
+}
+
+LOC_BTN = {
+    "uz": "📍 Lokatsiyamni yuborish",
+    "ru": "📍 Отправить геолокацию",
+}
+
+# ──────────────────────────────────────────────
+# API
+# ──────────────────────────────────────────────
+
+def _fetch_prayer_times(lat: float, lon: float) -> tuple[dict, dict]:
+    """Aladhan API dan namoz vaqtlarini olish."""
+    try:
+        url = (
+            f"https://api.aladhan.com/v1/timings"
+            f"?latitude={lat}&longitude={lon}&method=3"
+        )
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("data", {})
+            return data.get("timings", {}), data.get("meta", {})
+    except Exception as e:
+        logging.error(f"[prayer] API xato: {e}")
+    return {}, {}
+
+def _clean_time(raw: str) -> str:
+    """'05:12 (+05)' → '05:12'"""
+    return raw.split()[0] if raw and " " in raw else (raw or "—")
+
+def _format_prayer_msg(timings: dict, lang: str) -> str:
+    labels = PRAYER_LABELS.get(lang, PRAYER_LABELS["uz"])
+    today  = datetime.now().strftime("%d.%m.%Y")
+    lines  = []
+    for key, label in labels.items():
+        time = _clean_time(timings.get(key, "—"))
+        lines.append(f"  {label}: <b>{time}</b>")
+
+    return (
+        f"🕌 <b>Namoz vaqtlari — {today}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        + "\n".join(lines) + "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📡 <i>Aladhan.com orqali hisoblangan</i>"
+    )
+
+# ──────────────────────────────────────────────
+# Handler — UZ
+# ──────────────────────────────────────────────
+
+@router.message(F.text == "🕌 Namoz vaqtlari")
+async def prayer_uz(message: types.Message):
+    await _handle_prayer(message, "uz")
+
+# ──────────────────────────────────────────────
+# Handler — RU
+# ──────────────────────────────────────────────
+
+@router.message(F.text == "🕌 Время намаза")
+async def prayer_ru(message: types.Message):
+    await _handle_prayer(message, "ru")
+
+# ──────────────────────────────────────────────
+# Asosiy logika
+# ──────────────────────────────────────────────
+
+async def _handle_prayer(message: types.Message, fallback_lang: str):
+    user_id = message.from_user.id
+    lang = await db.get_user_lang(user_id) or fallback_lang
+
+    # Lokatsiyani tekshirish
+    location = await db.get_user_location(user_id)
+    if not location:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(
+                text=LOC_BTN.get(lang, LOC_BTN["uz"]),
+                request_location=True
+            )]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+        await message.answer(
+            NO_LOC_TEXT.get(lang, NO_LOC_TEXT["uz"]),
+            reply_markup=kb
+        )
+        return
+
+    lat, lon = location
+    wait_msg = await message.answer("⏳ Namoz vaqtlari yuklanmoqda...")
+
+    # Keshdan tekshirish
+    coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    cached = await db.get_prayer_cache(coord_key, today_str)
+
+    if cached:
+        timings = cached
+    else:
+        # API dan olish
+        timings, meta = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+        if not timings:
+            await wait_msg.edit_text(
+                "❌ Namoz vaqtlarini olishda xatolik yuz berdi.\n"
+                "Iltimos, qayta urinib ko'ring."
+            )
+            return
+        await db.upsert_prayer_cache(coord_key, today_str, timings)
+
+        # UTC offset ni saqlash (masalan: "Asia/Tashkent" → +5)
+        try:
+            tz_str = meta.get("timezone", "")
+            if tz_str:
+                import zoneinfo
+                from datetime import timezone
+                tz = zoneinfo.ZoneInfo(tz_str)
+                offset_seconds = datetime.now(tz).utcoffset().total_seconds()
+                offset_hours   = int(offset_seconds // 3600)
+                await db.set_utc_offset(user_id, offset_hours)
+        except Exception:
+            pass
+
+    # Oxirgi faollikni yangilash
+    await db.update_last_active(user_id)
+
+    # Javob yuborish
+    text = _format_prayer_msg(timings, lang)
+    await wait_msg.edit_text(text)

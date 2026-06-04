@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yaqin Masjid Topuvchi & Namoz Vaqtlari</title>
+  <meta name="description" content="Geolokatsiya asosida eng yaqin masjidni topuvchi va bugun‑kun namoz vaqtlarini ko‘rsatuvchi web ilova." />
+  <!-- Google Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+e2jGvS/6JY3vT4F+YB5G8g6YgX9w7a6hXc+4PZ1w="
+    crossorigin="" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="hero">
+    <h1>🕌 Yaqin Masjid Topuvchi</h1>
+    <p>Joylashuvingizni aniqlang yoki manzil kiriting</p>
+    <button id="locBtn" class="glassy">📍 Hozirgi joyim</button>
+    <input type="text" id="addrInput" placeholder="Manzil kiriting (masalan, Toshkent, Amir Temur ko'chasi)" />
+    <button id="searchBtn" class="glassy">🔎 Qidirish</button>
+    <button id="prayerBtn" class="glassy">🕰️ Namoz Vaqtlari</button>
+  </header>
+
+  <main>
+    <div id="map" class="map"></div>
+    <section id="info" class="info-card glassy">
+      <h2>🕌 Eng yaqin masjid</h2>
+      <p id="mosqueName">-</p>
+      <p id="mosqueAddr">-</p>
+      <p id="mosqueDist">-</p>
+    </section>
+  </main>
+
+  <!-- Modal for prayer times -->
+  <div id="prayerModal" class="modal hidden">
+    <div class="modal-content glassy">
+      <span id="closeModal" class="close">&times;</span>
+      <h2>📿 Bugungi Namoz Vaqtlari</h2>
+      <table id="prayerTable">
+        <thead>
+          <tr><th>Namoz</th><th>Vaqt</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1G7wB+Z9z2uXoH5p6w5R1t8E9g2zZ5eG6+f1j3cU="
+    crossorigin=""></script>
+  <script src="script.js"></script>
+</body>
+</html>
