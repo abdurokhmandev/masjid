@@ -17,6 +17,9 @@ async def main():
     await init_db()
 
     bot = Bot(token=os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode="HTML"))
+    # Initialize and start background scheduler
+    from services.scheduler import start_scheduler
+    start_scheduler(bot)
     dp = Dispatcher()
 
     # Handler routerlarini ro'yxatdan o'tkazish (Ketma-ketlik muhim!)

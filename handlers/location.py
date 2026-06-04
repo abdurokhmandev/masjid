@@ -64,6 +64,8 @@ async def handle_location(message: types.Message):
 
     user_lat = message.location.latitude
     user_lon = message.location.longitude
+    # Store location in DB
+    await db.update_user_location(message.from_user.id, user_lat, user_lon)
     
     try:
         # Namoz vaqtlari va masjidlarni parallel ravishda chaqiramiz

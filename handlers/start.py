@@ -18,7 +18,11 @@ TEXTS = {
 
 def main_menu_keyboard(lang: str):
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=TEXTS[lang]["btn_loc"], request_location=True)]],
+        keyboard=[
+            [KeyboardButton(text=TEXTS[lang]["btn_loc"], request_location=True)],
+            [KeyboardButton(text="⚙ Sozlamalar")],
+            [KeyboardButton(text="🧭 Qibla yo'nalishi")]
+        ],
         resize_keyboard=True
     )
 
