@@ -1,6 +1,6 @@
 [build]
-builder = "nixpacks"
+builder = "RAILPACK"
 
 [deploy]
 startCommand = "python main.py"
-restartPolicyType = "on-failure"
+restartPolicyType = "ON_FAILURE"
