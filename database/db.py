@@ -1,7 +1,12 @@
+import os
 import aiosqlite
 from datetime import datetime
 
-DB_PATH = "database.db"
+# Persistent volume support (e.g. Railway mounted at /data)
+if os.path.exists("/data") and os.path.isdir("/data"):
+    DB_PATH = "/data/database.db"
+else:
+    DB_PATH = os.getenv("DB_PATH", "database.db")
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
