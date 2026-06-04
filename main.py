@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
 from database.db import init_db
-from handlers import start, location, admin, settings, qibla, prayer, fallback
+from handlers import start, location, admin, settings, qibla, prayer, prayer_tracker, fallback
 
 load_dotenv()
 
@@ -30,19 +30,20 @@ async def main():
 
     # ── Routerlarni ro'yxatdan o'tkazish ──────
     # Ketma-ketlik muhim!
-    dp.include_router(admin.router)     # Admin birinchi (command filter)
-    dp.include_router(start.router)     # /start
-    dp.include_router(prayer.router)    # 🕌 Namoz vaqtlari tugmasi
-    dp.include_router(qibla.router)     # 🧭 Qibla yo'nalishi
-    dp.include_router(settings.router)  # ⚙️ Sozlamalar
-    dp.include_router(location.router)  # Lokatsiya (F.location)
-    dp.include_router(fallback.router)  # Oxirgi — noma'lum xabarlar
+    dp.include_router(admin.router)           # Admin birinchi (command filter)
+    dp.include_router(start.router)           # /start
+    dp.include_router(prayer.router)          # 🕌 Namoz vaqtlari tugmasi
+    dp.include_router(qibla.router)           # 🧭 Qibla yo'nalishi
+    dp.include_router(prayer_tracker.router)  # ✅/❌ Namoz belgilash callback
+    dp.include_router(settings.router)        # ⚙️ Sozlamalar
+    dp.include_router(location.router)        # Lokatsiya (F.location)
+    dp.include_router(fallback.router)        # Oxirgi — noma'lum xabarlar
 
     # ── Scheduler ─────────────────────────────
     from services.scheduler import start_scheduler
     start_scheduler(bot)
 
-    logging.info("🕌 Professional Masjid Bot ishga tushdi ✅")
+    logging.info("🕌 Masjidgacha Bot ishga tushdi ✅")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

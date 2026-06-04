@@ -15,10 +15,9 @@ router = Router()
 TEXTS = {
     "uz": {
         "welcome": (
-            "🕌 <b>Masjid Finder Botga xush kelibsiz!</b>\n\n"
-            "Atrofingizdagi eng yaqin masjidlarni topish,\n"
-            "namoz vaqtlarini bilish va Qibla yo'nalishini\n"
-            "aniqlash uchun pastdagi tugmalardan foydalaning. 👇"
+            "🕌 <b>«Masjidgacha» botining bosh sahifasiga xush kelibsiz!</b>\n\n"
+            "Ushbu bot sizga ibodatlaringizni tartibli va vaqtida bajarishda ko'makchi bo'ladi.\n"
+            "Quyidagi tugmalardan foydalanib kerakli bo'limga o'ting: 👇"
         ),
         "btn_loc":    "📍 Yaqin masjidlarni topish",
         "btn_prayer": "🕌 Namoz vaqtlari",
@@ -27,9 +26,9 @@ TEXTS = {
     },
     "ru": {
         "welcome": (
-            "🕌 <b>Добро пожаловать в Masjid Finder Bot!</b>\n\n"
-            "Используйте кнопки ниже, чтобы найти мечети,\n"
-            "узнать время намаза и определить направление Киблы. 👇"
+            "🕌 <b>Добро пожаловать на главную страницу бота «Masjidgacha»!</b>\n\n"
+            "Этот бот поможет вам организованно и своевременно совершать поклонения.\n"
+            "Используйте кнопки ниже для перехода в нужный раздел: 👇"
         ),
         "btn_loc":    "📍 Найти ближайшие мечети",
         "btn_prayer": "🕌 Время намаза",
@@ -63,20 +62,36 @@ async def cmd_start(message: types.Message):
     lang    = await db.get_user_lang(user_id)
 
     if lang:
-        # Til tanlangan → menyuni ko'rsatish
+        # Til tanlangan → menyuni ko'rsatish, til tanlashni qayta ko'rsatmaslik
         await db.update_last_active(user_id)
         await message.answer(TEXTS[lang]["welcome"], reply_markup=main_menu(lang))
     else:
-        # Yangi foydalanuvchi → bazaga qo'shib til so'rash
+        # Yangi foydalanuvchi → bazaga qo'shib til so'rash (juda chiroyli va taklif qiluvchi matn)
         await db.add_user(user_id, message.from_user.username, message.from_user.full_name)
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang_uz"),
             InlineKeyboardButton(text="🇷🇺 Русский",   callback_data="lang_ru"),
         ]])
-        await message.answer(
-            "🌐 Iltimos, tilni tanlang:\n🌐 Пожалуйста, выберите язык:",
-            reply_markup=kb
+        
+        intro_text = (
+            "✨ <b>Assalomu alaykum va rohmatullohi va barokatuh!</b> ✨\n\n"
+            "Barchamizni ibodatlarimizda sobitqadam qilgan Alloh taologa hamdlar bo'lsin.\n\n"
+            "<b>«Masjidgacha»</b> botiga xush kelibsiz! Ushbu bot yordamida siz:\n"
+            "  📍 Eng yaqin masjidlarni va masofani aniqlashingiz;\n"
+            "  🕌 O'z hududingizga mos aniq namoz vaqtlarini kuzatishingiz;\n"
+            "  🎯 Namozlaringizni o'z vaqtida belgilab, qazo daftaringizni yuritishingiz;\n"
+            "  🧭 Qibla yo'nalishini juda oson va aniq topishingiz mumkin.\n\n"
+            "<i>Iltimos, botdan foydalanish uchun o'zingizga qulay tilni tanlang:</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "✨ <b>Ассаляму алейкум ва рахматуллахи ва баракатух!</b> ✨\n\n"
+            "Приветствуем вас в боте <b>«Masjidgacha»</b>! С помощью этого бота вы сможете:\n"
+            "  📍 Находить ближайшие мечети и расстояние до них;\n"
+            "  🕌 Следить за точным временем намаза для вашего региона;\n"
+            "  🎯 Отмечать прочитанные намазы и вести учет пропущенных (казо);\n"
+            "  🧭 Легко и точно определять направление Киблы.\n\n"
+            "<i>Пожалуйста, выберите удобный для вас язык общения:</i>"
         )
+        await message.answer(intro_text, reply_markup=kb)
 
 # ──────────────────────────────────────────────
 # Til tanlash callback

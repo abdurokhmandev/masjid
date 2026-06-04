@@ -1,9 +1,9 @@
 import asyncio
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from aiogram import Router, types, F
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import db
 
 router = Router()
@@ -31,21 +31,25 @@ PRAYER_LABELS = {
     },
 }
 
-NO_LOC_TEXT = {
-    "uz": (
-        "📍 <b>Namoz vaqtlarini ko'rish uchun</b>\n\n"
-        "Avval lokatsiyangizni yuboring:"
-    ),
-    "ru": (
-        "📍 <b>Для получения времени намаза</b>\n\n"
-        "Сначала отправьте свою геолокацию:"
-    ),
-}
+# ──────────────────────────────────────────────
+# Viloyatlar (sozlamalar bilan mos kelishi uchun)
+# ──────────────────────────────────────────────
 
-LOC_BTN = {
-    "uz": "📍 Lokatsiyamni yuborish",
-    "ru": "📍 Отправить геолокацию",
-}
+REGIONS = [
+    ("Toshkent",    41.2995, 69.2401),
+    ("Samarqand",   39.6542, 66.9597),
+    ("Buxoro",      39.7680, 64.4220),
+    ("Andijon",     40.7821, 72.3441),
+    ("Namangan",    41.0011, 71.6726),
+    ("Farg'ona",    40.3864, 71.7864),
+    ("Qashqadaryo", 38.8600, 65.7900),
+    ("Surxondaryo", 37.9400, 67.5700),
+    ("Xorazm",      41.5500, 60.6300),
+    ("Navoiy",      40.0840, 65.3792),
+    ("Jizzax",      40.1158, 67.8422),
+    ("Sirdaryo",    40.7497, 68.6540),
+    ("Qoraqalpog'iston", 43.7682, 59.4024),
+]
 
 # ──────────────────────────────────────────────
 # API
@@ -70,7 +74,7 @@ def _clean_time(raw: str) -> str:
     """'05:12 (+05)' → '05:12'"""
     return raw.split()[0] if raw and " " in raw else (raw or "—")
 
-def _format_prayer_msg(timings: dict, lang: str) -> str:
+def _format_prayer_msg(timings: dict, lang: str, region: str, source: str) -> str:
     labels = PRAYER_LABELS.get(lang, PRAYER_LABELS["uz"])
     today  = datetime.now().strftime("%d.%m.%Y")
     lines  = []
@@ -78,13 +82,54 @@ def _format_prayer_msg(timings: dict, lang: str) -> str:
         time = _clean_time(timings.get(key, "—"))
         lines.append(f"  {label}: <b>{time}</b>")
 
+    if lang == "ru":
+        header = (
+            f"🕌 <b>Время намаза — {today}</b>\n"
+            f"📍 Регион: <b>{region}</b>\n"
+            f"({source})\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+        )
+    else:
+        header = (
+            f"🕌 <b>Namoz vaqtlari — {today}</b>\n"
+            f"📍 Hudud: <b>{region}</b>\n"
+            f"({source})\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+        )
+
     return (
-        f"🕌 <b>Namoz vaqtlari — {today}</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        header
         + "\n".join(lines) + "\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📡 <i>Aladhan.com orqali hisoblangan</i>"
+        "🤲 <i>Alloh qabul qilsin!</i>" if lang == "uz" else
+        header + "\n".join(lines) + "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🤲 <i>Да примет Аллах!</i>"
     )
+
+def _change_region_kb(lang: str) -> InlineKeyboardMarkup:
+    """Hududni o'zgartirish tugmasi."""
+    text = "📍 Hududni o'zgartirish" if lang == "uz" else "📍 Изменить регион"
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=text, callback_data="prayer_select_region")
+    ]])
+
+def _regions_kb_prayer(lang: str) -> InlineKeyboardMarkup:
+    buttons = []
+    row = []
+    for name, lat, lon in REGIONS:
+        row.append(InlineKeyboardButton(
+            text=name,
+            callback_data=f"prayerregion_{name}_{lat}_{lon}"
+        ))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    back_text = "⬅️ Orqaga" if lang == "uz" else "⬅️ Назад"
+    buttons.append([InlineKeyboardButton(text=back_text, callback_data="prayer_region_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 # ──────────────────────────────────────────────
 # Handler — UZ
@@ -108,30 +153,30 @@ async def prayer_ru(message: types.Message):
 
 async def _handle_prayer(message: types.Message, fallback_lang: str):
     user_id = message.from_user.id
-    lang = await db.get_user_lang(user_id) or fallback_lang
+    lang    = await db.get_user_lang(user_id) or fallback_lang
 
+    # Foydalanuvchi lokatsiyasi OR tanlangan viloyat
     location = await db.get_user_location(user_id)
-    is_default = False
-    if not location:
-        # Default: Toshkent
-        lat, lon = 41.2995, 69.2401
-        is_default = True
-    else:
+    region, reg_lat, reg_lon = await db.get_user_region(user_id)
+
+    if location:
         lat, lon = location
+        source = "📍 Joylashuvingiz asosida" if lang == "uz" else "📍 По вашей геолокации"
+    else:
+        lat, lon = reg_lat, reg_lon
+        source = f"🗺 {region} hududi asosida" if lang == "uz" else f"🗺 По региону {region}"
 
     wait_msg = await message.answer(
         "⏳ Namoz vaqtlari yuklanmoqda..." if lang == "uz" else "⏳ Загрузка времени намаза..."
     )
 
-    # Keshdan tekshirish
     coord_key = f"{round(lat, 5)},{round(lon, 5)}"
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
-    cached = await db.get_prayer_cache(coord_key, today_str)
+    cached    = await db.get_prayer_cache(coord_key, today_str)
 
     if cached:
         timings = cached
     else:
-        # API dan olish
         timings, meta = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
         if not timings:
             await wait_msg.edit_text(
@@ -141,13 +186,12 @@ async def _handle_prayer(message: types.Message, fallback_lang: str):
             return
         await db.upsert_prayer_cache(coord_key, today_str, timings)
 
-        # UTC offset ni saqlash (faqat default bo'lmaganda)
-        if not is_default:
+        # UTC offset ni saqlash
+        if location:
             try:
                 tz_str = meta.get("timezone", "")
                 if tz_str:
                     import zoneinfo
-                    from datetime import timezone
                     tz = zoneinfo.ZoneInfo(tz_str)
                     offset_seconds = datetime.now(tz).utcoffset().total_seconds()
                     offset_hours   = int(offset_seconds // 3600)
@@ -155,24 +199,102 @@ async def _handle_prayer(message: types.Message, fallback_lang: str):
             except Exception:
                 pass
 
-    # Oxirgi faollikni yangilash
     await db.update_last_active(user_id)
 
-    # Javob yuborish
-    text = _format_prayer_msg(timings, lang)
-    if is_default:
-        if lang == "uz":
-            text = (
-                "⚠️ <b>Siz hali joylashuvingizni ulashmagansiz.</b>\n"
-                "Toshkent shahri uchun namoz vaqtlari ko'rsatilmoqda.\n"
-                "O'z joylashuvingizni yuborish uchun <b>📍 Yaqin masjidlarni topish</b> tugmasini bosing.\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n" + text
-            )
+    text = _format_prayer_msg(timings, lang, region if not location else ("Joylashuvingiz" if lang == "uz" else "Ваша геолокация"), source)
+    await wait_msg.edit_text(text, reply_markup=_change_region_kb(lang))
+
+# ──────────────────────────────────────────────
+# Viloyat tanlash (namoz bo'limidan)
+# ──────────────────────────────────────────────
+
+@router.callback_query(F.data == "prayer_select_region")
+async def prayer_select_region(callback: types.CallbackQuery):
+    lang = await db.get_user_lang(callback.from_user.id) or "uz"
+    title = (
+        "📍 <b>Viloyatingizni tanlang:</b>\n\n"
+        "<i>Tanlangan viloyat bo'yicha namoz vaqtlari hisoblanadi.</i>"
+        if lang == "uz" else
+        "📍 <b>Выберите ваш регион:</b>\n\n"
+        "<i>По выбранному региону будет рассчитано время намаза.</i>"
+    )
+    await callback.message.edit_text(title, reply_markup=_regions_kb_prayer(lang))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("prayerregion_"))
+async def set_prayer_region(callback: types.CallbackQuery):
+    parts = callback.data.split("_", 3)
+    if len(parts) < 4:
+        await callback.answer("❌ Xatolik")
+        return
+    _, name, lat_str, lon_str = parts
+    try:
+        lat = float(lat_str)
+        lon = float(lon_str)
+    except ValueError:
+        await callback.answer("❌ Koordinata xatolik")
+        return
+
+    user_id = callback.from_user.id
+    lang    = await db.get_user_lang(user_id) or "uz"
+    await db.set_user_region(user_id, name, lat, lon)
+
+    # Yangi vaqtlarni yuklash
+    loading = "⏳ Vaqtlar yuklanmoqda..." if lang == "uz" else "⏳ Загрузка времени..."
+    await callback.message.edit_text(loading)
+
+    coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    cached    = await db.get_prayer_cache(coord_key, today_str)
+
+    if cached:
+        timings = cached
+    else:
+        timings, _ = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+        if timings:
+            await db.upsert_prayer_cache(coord_key, today_str, timings)
+
+    if timings:
+        source = f"🗺 {name} hududi asosida" if lang == "uz" else f"🗺 По региону {name}"
+        text = _format_prayer_msg(timings, lang, name, source)
+        await callback.message.edit_text(text, reply_markup=_change_region_kb(lang))
+    else:
+        err = "❌ Vaqtlarni yuklab bo'lmadi." if lang == "uz" else "❌ Не удалось загрузить время."
+        await callback.message.edit_text(err, reply_markup=_change_region_kb(lang))
+
+    msg = f"✅ Hudud: {name}" if lang == "uz" else f"✅ Регион: {name}"
+    await callback.answer(msg)
+
+
+@router.callback_query(F.data == "prayer_region_back")
+async def prayer_region_back(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    lang    = await db.get_user_lang(user_id) or "uz"
+    location = await db.get_user_location(user_id)
+    region, reg_lat, reg_lon = await db.get_user_region(user_id)
+
+    if location:
+        lat, lon = location
+        source   = "📍 Joylashuvingiz asosida" if lang == "uz" else "📍 По вашей геолокации"
+        show_region = "Joylashuvingiz" if lang == "uz" else "Ваша геолокация"
+    else:
+        lat, lon   = reg_lat, reg_lon
+        source     = f"🗺 {region} hududi asosida" if lang == "uz" else f"🗺 По региону {region}"
+        show_region = region
+
+    coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    cached    = await db.get_prayer_cache(coord_key, today_str)
+    if not cached:
+        timings, _ = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+        if timings:
+            await db.upsert_prayer_cache(coord_key, today_str, timings)
         else:
-            text = (
-                "⚠️ <b>Вы еще не поделились геопозицией.</b>\n"
-                "Показано время намаза для Ташкента.\n"
-                "Чтобы отправить свою геопозицию, нажмите кнопку <b>📍 Найти ближайшие мечети</b>.\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n" + text
-            )
-    await wait_msg.edit_text(text)
+            timings = {}
+    else:
+        timings = cached
+
+    text = _format_prayer_msg(timings, lang, show_region, source)
+    await callback.message.edit_text(text, reply_markup=_change_region_kb(lang))
+    await callback.answer()
