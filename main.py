@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
 from database.db import init_db
-from handlers import start, location, admin, settings, qibla, prayer, prayer_tracker, fallback
+from handlers import start, location, admin, settings, qibla, prayer, prayer_tracker, fallback, nearest_mosque
 
 load_dotenv()
 
@@ -36,6 +36,7 @@ async def main():
     dp.include_router(qibla.router)           # 🧭 Qibla yo'nalishi
     dp.include_router(prayer_tracker.router)  # ✅/❌ Namoz belgilash callback
     dp.include_router(settings.router)        # ⚙️ Sozlamalar
+    dp.include_router(nearest_mosque.router)  # 📍 Yaqin masjid tugmasi
     dp.include_router(location.router)        # Lokatsiya (F.location)
     dp.include_router(fallback.router)        # Oxirgi — noma'lum xabarlar
 

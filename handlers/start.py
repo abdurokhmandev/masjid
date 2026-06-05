@@ -45,7 +45,7 @@ def main_menu(lang: str) -> ReplyKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["uz"])
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=t["btn_loc"], request_location=True)],
+            [KeyboardButton(text=t["btn_loc"])],
             [KeyboardButton(text=t["btn_prayer"]), KeyboardButton(text=t["btn_qibla"])],
             [KeyboardButton(text=t["btn_sett"])],
         ],

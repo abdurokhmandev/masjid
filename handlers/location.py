@@ -5,6 +5,7 @@ from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from geopy.distance import geodesic
 from database import db
+from handlers.start import main_menu
 
 router = Router()
 
@@ -101,6 +102,7 @@ async def handle_location(message: types.Message):
 
         if not elements:
             await wait_msg.edit_text(T["not_found"])
+            await message.answer("Bosh menyu:", reply_markup=main_menu(lang))
             return
 
         # ── Masjidlarni saralash va tozalash ──────────
@@ -161,6 +163,7 @@ async def handle_location(message: types.Message):
 
         if not top3:
             await wait_msg.edit_text(T["not_found"])
+            await message.answer("Bosh menyu:", reply_markup=main_menu(lang))
             return
 
         # ── Javob matni va tugmalar ─────────────────
@@ -202,7 +205,11 @@ async def handle_location(message: types.Message):
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
             disable_web_page_preview=True,
         )
+        
+        # Asosiy menyuni qaytarish
+        await message.answer("📍 Bosh menyu:", reply_markup=main_menu(lang))
 
     except Exception as e:
         logging.error(f"[location] Xatolik: {e}")
         await wait_msg.edit_text(T["error"])
+        await message.answer("Bosh menyu:", reply_markup=main_menu(lang))
