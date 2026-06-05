@@ -149,21 +149,17 @@ async def _handle_qibla(message: types.Message):
             "🕋 — yuqoridagi kompasda Ka'ba tomoni ko'rsatilgan."
         )
 
-    # Default joylashuv haqida ogohlantirish
+    # Default location handling – show informative message with button
     if is_default:
-        if lang == "ru":
-            warn = (
-                "⚠️ <b>Геопозиция не получена.</b> Показано для Ташкента.\n"
-                "Для точного направления нажмите <b>📍 Найти ближайшие мечети</b>.\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-            )
-        else:
-            warn = (
-                "⚠️ <b>Joylashuv aniqlanmagan.</b> Toshkent uchun ko'rsatilmoqda.\n"
-                "Aniq yo'nalish uchun <b>📍 Yaqin masjidlarni topish</b> tugmasini bosing.\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-            )
-        text = warn + text
-
-    await message.answer(text)
+        # Message text with markdown formatting
+        intro_text = (
+            "✨ <b>Interaktiv Qibla Kompasi 🕋</b>\n\n"
+            "Qayerda bo'lishingizdan qat'iy nazar, namoz vaqtlari va Qibla tomonni to'g'ri topish endi yanada qulay!\n\n"
+            "👇 Pastdagi tugmani bosing va smartfoningizni tekis joyga qo'ying:"
+        )
+        button = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Qiblani aniqlash 🕋", url="https://masjidhtml.vercel.app/")]])
+        await message.answer(intro_text, reply_markup=button, parse_mode="HTML")
+    else:
+        # Send the detailed Qibla direction text
+        await message.answer(text)
     await db.update_last_active(user_id)
