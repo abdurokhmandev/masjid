@@ -1,31 +1,39 @@
 <!DOCTYPE html>
 <html lang="uz">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Masjidgacha – Qibla Yo'nalishi</title>
-  <meta name="description" content="Qibla yo'nalishini aniqlash va professional dizayn" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Masjidgacha – Qibla Yo'nalishi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9E6QJt8CNhZRCQOJUWcFDKM7piujFK4MwFfy2x7OWU=" crossorigin=""></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+6WvZ6V6byMZu+f1eeS0Cml5Zt7N1riRWN6K86v8M=" crossorigin=""/>
 </head>
 <body>
-  <main class="container">
-    <h1 class="title">Qibla Yo'nalishini Aniqlash</h1>
-    <p class="subtitle">Geolokatsiya orqali Kaaba (Makkah) tomoniga yo'nalishni ko'rsatuvchi kompas</p>
-    <div class="compass-card">
-      <div class="compass">
-        <img src="https://i.imgur.com/6kQbT4R.png" alt="Compass background" class="compass-bg" />
-        <img src="https://i.imgur.com/8Qz9Jcx.png" alt="Arrow" id="arrow" class="compass-arrow" />
-      </div>
-      <div id="status" class="status">Joylashuvingizni aniqlash uchun "Qidir" tugmasini bosing</div>
-      <button id="locateBtn" class="btn-primary">Qidir</button>
-    </div>
-    <footer class="footer">
-      <p>© 2026 Masjidgacha – All rights reserved.</p>
-    </footer>
-  </main>
-  <script src="script.js"></script>
+    <main class="container">
+        <section class="hero">
+            <h1>🕋 Qibla Yo'nalishi</h1>
+            <p>Ushbu sahifa sizning joriy joylashuvingizga asoslanib Kaaba tomonidagi yo'nalishni ko'rsatadi.</p>
+        </section>
+        <section class="map-section">
+            <div id="map" class="map"></div>
+            <div class="compass">
+                <div class="arrow" id="arrow"></div>
+            </div>
+        </section>
+        <section class="info">
+            <p id="status">Joylashuvingizni aniqlash uchun ruxsat bering…</p>
+            <button class="inline-btn" id="qiblaBtn">Qibla aniqlash 🕋</button>
+        </section>
+    </main>
+        <script src="script.js"></script>
+        <script>
+          // Inline button to open Qibla page
+          document.getElementById('qiblaBtn').addEventListener('click', () => {
+            window.open('https://masjidhtml.vercel.app/', '_blank');
+          });
+        </script>
 </body>
 </html>
