@@ -150,17 +150,22 @@ async def _handle_qibla(message: types.Message):
             "🕋 — yuqoridagi kompasda Ka'ba tomoni ko'rsatilgan."
         )
 
-    # Default location handling – show informative message with button
-    if is_default:
-        # Message text with markdown formatting
+    # Har doim chiroyli message + inline button ko'rsat
+    if lang == "ru":
+        intro_text = (
+            "✨ <b>Интерактивный компас Киблы 🕋</b>\n\n"
+            "Где бы вы ни находились — намаз и направление Киблы теперь стало проще!\n\n"
+            "👇 Нажмите кнопку ниже и положите телефон на ровную поверхность:"
+        )
+        btn_text = "Определить Киблу 🕋"
+    else:
         intro_text = (
             "✨ <b>Interaktiv Qibla Kompasi 🕋</b>\n\n"
             "Qayerda bo'lishingizdan qat'iy nazar, namoz vaqtlari va Qibla tomonni to'g'ri topish endi yanada qulay!\n\n"
             "👇 Pastdagi tugmani bosing va smartfoningizni tekis joyga qo'ying:"
         )
-        button = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Qiblani aniqlash 🕋", url="https://masjidhtml.vercel.app/")]])
-        await message.answer(intro_text, reply_markup=button, parse_mode="HTML")
-    else:
-        # Send the detailed Qibla direction text
-        await message.answer(text)
+        btn_text = "Qiblani aniqlash 🕋"
+
+    button = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=btn_text, url="https://masjidhtml.vercel.app/")]])
+    await message.answer(intro_text, reply_markup=button, parse_mode="HTML")
     await db.update_last_active(user_id)
