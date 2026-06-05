@@ -43,7 +43,7 @@ TEXTS = {
 }
 
 # Google Maps — masjidlar filtri bilan (GPS orqali o'zi topadi)
-GMAPS_MOSQUE_URL = "https://www.google.com/maps/search/masjid+yaqin/"
+GMAPS_MOSQUE_URL = "https://maps.app.goo.gl/9sVsDxqSV2W76T7dA"
 
 # ──────────────────────────────────────────────
 # "Yaqin masjid" tugmasi — 2 ta variant taklif
