@@ -67,6 +67,13 @@ async def init_db():
                 UNIQUE(user_id, date_str, prayer_name)
             )
         """)
+        # Yuborilgan eslatmalar jadvali (RAM o'rniga DB da saqlash)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sent_notifications (
+                key TEXT PRIMARY KEY,
+                sent_at TEXT
+            )
+        """)
         await db.commit()
 
 # ──────────────────────────────────────────────
@@ -395,3 +402,33 @@ async def get_users_with_notifications() -> list[int]:
         ) as cur:
             rows = await cur.fetchall()
             return [r[0] for r in rows]
+
+# ──────────────────────────────────────────────
+# Eslatmalar keshi (RAM o'rniga DB)
+# ──────────────────────────────────────────────
+
+async def is_notification_sent(key: str) -> bool:
+    """Berilgan kalit bo'yicha eslatma yuborilganmi?"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT key FROM sent_notifications WHERE key = ?", (key,)
+        ) as cur:
+            return await cur.fetchone() is not None
+
+async def mark_notification_sent(key: str):
+    """Eslatmani yuborilgan deb belgilash."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO sent_notifications (key, sent_at) VALUES (?, ?)",
+            (key, datetime.utcnow().strftime("%Y-%m-%d %H:%M"))
+        )
+        await db.commit()
+
+async def clear_old_notifications(days: int = 2):
+    """Eski (2 kundan eski) eslatmalarni tozalash."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM sent_notifications WHERE sent_at < datetime('now', '-' || ? || ' days')",
+            (days,)
+        )
+        await db.commit()

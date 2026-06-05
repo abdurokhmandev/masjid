@@ -136,9 +136,7 @@ async def send_daily_report(bot: Bot):
 # Namoz vaqti eslatmasi (15 daqiqa oldin)
 # ──────────────────────────────────────────────
 
-# Takroriy eslatma yuborilmasligi uchun kesh
-_sent_reminders: set = set()
-_sent_trackers:  set = set()
+# RAM keshi o'chirildi — endi DB ishlatiladi
 
 async def reminder_checker(bot: Bot):
     """Har daqiqada:
@@ -186,51 +184,53 @@ async def reminder_checker(bot: Bot):
                 tracker_key  = f"{user_id}_{today_str}_{prayer_key}_tracker"
 
                 # ─── 15 daqiqa oldin eslatma ───────────────────
-                if 14 <= diff_minutes <= 15 and reminder_key not in _sent_reminders:
-                    _sent_reminders.add(reminder_key)
-                    mins = int(diff_minutes)
-                    if lang == "ru":
-                        text = (
-                            f"🔔 <b>До намаза {label} осталось {mins} минут!</b>\n\n"
-                            f"⏰ Время: <b>{time_str}</b>\n"
-                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🤲 <i>Да примет Аллах!</i>"
-                        )
-                    else:
-                        text = (
-                            f"🔔 <b>{label} namoziga {mins} daqiqa qoldi!</b>\n\n"
-                            f"⏰ Vaqti: <b>{time_str}</b>\n"
-                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🤲 <i>Alloh qabul qilsin!</i>"
-                        )
-                    await bot.send_message(user_id, text, parse_mode="HTML")
+                if 14 <= diff_minutes <= 15:
+                    if not await db.is_notification_sent(reminder_key):
+                        await db.mark_notification_sent(reminder_key)
+                        mins = int(diff_minutes)
+                        if lang == "ru":
+                            text = (
+                                f"🔔 <b>До намаза {label} осталось {mins} минут!</b>\n\n"
+                                f"⏰ Время: <b>{time_str}</b>\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"🤲 <i>Да примет Аллах!</i>"
+                            )
+                        else:
+                            text = (
+                                f"🔔 <b>{label} namoziga {mins} daqiqa qoldi!</b>\n\n"
+                                f"⏰ Vaqti: <b>{time_str}</b>\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"🤲 <i>Alloh qabul qilsin!</i>"
+                            )
+                        await bot.send_message(user_id, text, parse_mode="HTML")
 
                 # ─── 30 daqiqa o'tgach so'rovnoma ───────────────
-                elif -31 <= diff_minutes <= -29 and tracker_key not in _sent_trackers:
-                    # Avval belgilanmagan bo'lsa so'rov yuborish
-                    status = await db.get_prayer_status(user_id, today_str, prayer_key)
-                    if status and status in ("prayed", "qaza"):
-                        _sent_trackers.add(tracker_key)
-                        continue
+                elif -31 <= diff_minutes <= -29:
+                    if not await db.is_notification_sent(tracker_key):
+                        # Avval belgilanmagan bo'lsa so'rov yuborish
+                        status = await db.get_prayer_status(user_id, today_str, prayer_key)
+                        if status and status in ("prayed", "qaza"):
+                            await db.mark_notification_sent(tracker_key)
+                            continue
 
-                    _sent_trackers.add(tracker_key)
+                        await db.mark_notification_sent(tracker_key)
 
-                    from handlers.prayer_tracker import prayer_confirm_kb
-                    if lang == "ru":
-                        text = (
-                            f"🕌 <b>Намаз {label} начался 30 минут назад.</b>\n\n"
-                            f"Вы совершили намаз вовремя?"
+                        from handlers.prayer_tracker import prayer_confirm_kb
+                        if lang == "ru":
+                            text = (
+                                f"🕌 <b>Намаз {label} начался 30 минут назад.</b>\n\n"
+                                f"Вы совершили намаз вовремя?"
+                            )
+                        else:
+                            text = (
+                                f"🕌 <b>{label} namoz vaqti 30 daqiqa oldin boshlangan edi.</b>\n\n"
+                                f"Namozingizni o'z vaqtida o'qidingizmi?"
+                            )
+                        await bot.send_message(
+                            user_id, text,
+                            parse_mode="HTML",
+                            reply_markup=prayer_confirm_kb(prayer_key, today_str, lang)
                         )
-                    else:
-                        text = (
-                            f"🕌 <b>{label} namoz vaqti 30 daqiqa oldin boshlangan edi.</b>\n\n"
-                            f"Namozingizni o'z vaqtida o'qidingizmi?"
-                        )
-                    await bot.send_message(
-                        user_id, text,
-                        parse_mode="HTML",
-                        reply_markup=prayer_confirm_kb(prayer_key, today_str, lang)
-                    )
 
         except Exception as e:
             logging.warning(f"[scheduler] reminder {user_id}: {e}")
@@ -316,10 +316,9 @@ async def midnight_qaza_mark(bot: Bot):
         except Exception as e:
             logging.warning(f"[scheduler] midnight_qaza {user_id}: {e}")
 
-    # Kesh tozalash (yangi kun uchun)
-    _sent_reminders.clear()
-    _sent_trackers.clear()
-    logging.info("[scheduler] Yarim tun: belgilanmagan namozlar qaza qilindi, kesh tozalandi.")
+    # Eski eslatmalarni tozalash + kesh yangilash
+    await db.clear_old_notifications(days=2)
+    logging.info("[scheduler] Yarim tun: belgilanmagan namozlar qaza qilindi, eski eslatmalar tozalandi.")
 
 # ──────────────────────────────────────────────
 # Schedulerni ishga tushirish
