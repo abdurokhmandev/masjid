@@ -15,7 +15,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 # ──────────────────────────────────────────────
 
 class AdminState(StatesGroup):
-    broadcast = State()
+    broadcast_msg = State()
+    broadcast_btn = State()
 
 # ──────────────────────────────────────────────
 # Klaviaturalar
@@ -28,6 +29,7 @@ def admin_main_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="👥 Foydalanuvchilar",  callback_data="adm_users"),
         ],
         [InlineKeyboardButton(text="📢 Broadcast xabar",      callback_data="adm_broadcast")],
+        [InlineKeyboardButton(text="🔔 Qolib ketgan hisobotlar", callback_data="adm_missing_reports")],
         [InlineKeyboardButton(text="🔄 Yangilash",            callback_data="adm_refresh")],
     ])
 
@@ -158,12 +160,11 @@ async def adm_broadcast_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "📢 <b>Broadcast xabar yuborish</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "Barcha foydalanuvchilarga yuboriladigan\n"
-        "xabarni yozing yoki media yuboring:\n\n"
-        "<i>✏️ Matn, 🖼 Rasm, 🎥 Video — istalgan format</i>",
+        "Barcha foydalanuvchilarga yuboriladigan xabarni yoki mediani yuboring "
+        "(yoki forward qiling).",
         reply_markup=kb
     )
-    await state.set_state(AdminState.broadcast)
+    await state.set_state(AdminState.broadcast_msg)
     await callback.answer()
 
 @router.callback_query(F.data == "adm_cancel_bc", F.from_user.id == ADMIN_ID)
@@ -173,18 +174,112 @@ async def adm_cancel_bc(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, reply_markup=admin_main_kb())
     await callback.answer("Bekor qilindi")
 
-@router.message(AdminState.broadcast, F.from_user.id == ADMIN_ID)
-async def adm_do_broadcast(message: types.Message, state: FSMContext):
+@router.message(AdminState.broadcast_msg, F.from_user.id == ADMIN_ID)
+async def adm_bc_get_msg(message: types.Message, state: FSMContext):
+    # Xabarni FSMda saqlab qolamiz (ID va chat_id orqali keyinchalik copy qilish uchun)
+    await state.update_data(bc_message_id=message.message_id, bc_chat_id=message.chat.id)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ O'tkazib yuborish (Tugmasiz)", callback_data="adm_bc_skip_btn")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm_cancel_bc")]
+    ])
+    
+    await message.answer(
+        "🎛 <b>Tugmalar qo'shish</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Agar xabarga inline tugmalar qo'shmoqchi bo'lsangiz, quyidagi formatda yuboring:\n\n"
+        "<code>Tugma matni | https://link.uz</code>\n\n"
+        "Agar bir nechta tugma kerak bo'lsa, har birini yangi qatordan yozing:\n"
+        "<code>Tugma 1 | https://link1.uz\nTugma 2 | https://link2.uz</code>\n\n"
+        "Agar tugma kerak bo'lmasa, «O'tkazib yuborish» ni bosing.",
+        reply_markup=kb
+    )
+    await state.set_state(AdminState.broadcast_btn)
+
+from aiogram import Bot
+
+async def _show_bc_preview(message: types.Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    msg_id = data.get("bc_message_id")
+    chat_id = data.get("bc_chat_id")
+    reply_markup = data.get("bc_reply_markup")
+    
+    # Klaviatura obyektini tiklash
+    kb = None
+    if reply_markup:
+        kb = InlineKeyboardMarkup.model_validate(reply_markup)
+        
+    await message.answer("👀 <b>Xabar premyerasi (shunday ko'rinadi):</b>")
+    await bot.copy_message(
+        chat_id=message.chat.id,
+        from_chat_id=chat_id,
+        message_id=msg_id,
+        reply_markup=kb
+    )
+    
+    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Barchaga yuborish", callback_data="adm_bc_send")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm_cancel_bc")]
+    ])
+    await message.answer("Yuboramizmi?", reply_markup=confirm_kb)
+
+@router.callback_query(F.data == "adm_bc_skip_btn", AdminState.broadcast_btn, F.from_user.id == ADMIN_ID)
+async def adm_bc_skip_btn(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    await state.update_data(bc_reply_markup=None)
+    await _show_bc_preview(callback.message, state, bot)
+    await callback.answer()
+
+@router.message(AdminState.broadcast_btn, F.from_user.id == ADMIN_ID)
+async def adm_bc_get_btn(message: types.Message, state: FSMContext, bot: Bot):
+    # Tugmalarni parsing qilish
+    lines = message.text.split("\n")
+    kb_rows = []
+    for line in lines:
+        if "|" in line:
+            parts = line.split("|", 1)
+            text = parts[0].strip()
+            url = parts[1].strip()
+            if url.startswith("http"):
+                kb_rows.append([InlineKeyboardButton(text=text, url=url)])
+                
+    if not kb_rows:
+        await message.answer("⚠️ Noto'g'ri format. Iltimos qaytadan yuboring yoki O'tkazib yuborishni bosing.")
+        return
+        
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    # Json formatida saqlaymiz (aiogram 3 da model_dump ishlatiladi)
+    await state.update_data(bc_reply_markup=kb.model_dump())
+    
+    await _show_bc_preview(message, state, bot)
+
+@router.callback_query(F.data == "adm_bc_send", F.from_user.id == ADMIN_ID)
+async def adm_bc_send(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    msg_id = data.get("bc_message_id")
+    chat_id = data.get("bc_chat_id")
+    reply_markup = data.get("bc_reply_markup")
+    
+    kb = None
+    if reply_markup:
+        kb = InlineKeyboardMarkup.model_validate(reply_markup)
+        
     await state.clear()
+    
     users = await db.get_all_users()
-    progress = await message.answer(
+    progress = await callback.message.answer(
         f"📤 <b>Yuborilmoqda...</b>\n"
         f"👥 Foydalanuvchilar soni: <b>{len(users)}</b>"
     )
+    
     success, failed = 0, 0
-    for user_id in users:
+    for u_id in users:
         try:
-            await message.copy_to(chat_id=user_id)
+            await bot.copy_message(
+                chat_id=u_id,
+                from_chat_id=chat_id,
+                message_id=msg_id,
+                reply_markup=kb
+            )
             success += 1
             await asyncio.sleep(0.05)   # Telegram flood limitidan himoya
         except Exception:
@@ -196,4 +291,50 @@ async def adm_do_broadcast(message: types.Message, state: FSMContext):
         f"📤 Muvaffaqiyatli:  <b>{success}</b>\n"
         f"❌ Yetkazilmadi:   <b>{failed}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━"
+    )
+    await callback.answer()
+
+# ──────────────────────────────────────────────
+# O'tgan kunlar uchun eslatma (Missing Reports)
+# ──────────────────────────────────────────────
+
+@router.callback_query(F.data == "adm_missing_reports", F.from_user.id == ADMIN_ID)
+async def adm_missing_reports(callback: types.CallbackQuery, bot: Bot):
+    progress = await callback.message.answer("⏳ <b>Hisobotlar tekshirilmoqda...</b>\nBu biroz vaqt olishi mumkin.")
+    await callback.answer()
+    
+    missing_data = await db.get_users_missing_reports(days_back=3)
+    if not missing_data:
+        await progress.edit_text("✅ <b>Barcha foydalanuvchilar hisobotlarni topshirgan!</b>\nQolib ketganlar yo'q.")
+        return
+        
+    sent_count = 0
+    for uid, dates in missing_data.items():
+        for d_str in dates:
+            # Sana formatini o'zgartiramiz: 2026-06-05 -> 05.06.2026
+            parts = d_str.split("-")
+            formatted_date = f"{parts[2]}.{parts[1]}.{parts[0]}" if len(parts) == 3 else d_str
+            
+            text = (
+                f"⚠️ <b>Assalomu alaykum!</b>\n\n"
+                f"Siz <b>{formatted_date}</b> kungi namozlaringizni belgilashni unutgansiz.\n"
+                f"Iltimos, o'sha kun uchun hisobotingizni yakunlab qo'ying!"
+            )
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"📅 {formatted_date} ni belgilash", callback_data=f"fill_past_{d_str}")]
+            ])
+            
+            try:
+                await bot.send_message(uid, text, reply_markup=kb, parse_mode="HTML")
+                sent_count += 1
+                await asyncio.sleep(0.05)
+            except Exception:
+                pass
+                
+    await progress.edit_text(
+        f"✅ <b>Qolib ketgan hisobotlar bo'yicha eslatmalar yuborildi!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Foydalanuvchilar soni: <b>{len(missing_data)}</b>\n"
+        f"📤 Yuborilgan xabarlar: <b>{sent_count}</b>"
     )

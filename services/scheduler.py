@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -10,7 +11,8 @@ from database import db
 # Global scheduler
 # ──────────────────────────────────────────────
 
-scheduler = AsyncIOScheduler()
+UZ_TZ = ZoneInfo("Asia/Tashkent")
+scheduler = AsyncIOScheduler(timezone=UZ_TZ)
 
 # ──────────────────────────────────────────────
 # Yordamchi funksiyalar
@@ -177,7 +179,8 @@ async def reminder_checker(bot: Bot):
                 except ValueError:
                     continue
 
-                diff_minutes = (prayer_dt - now).total_seconds() / 60
+                # Vaqt farqini aniq daqiqalarda hisoblash (soniyalarni olib tashlab)
+                diff_minutes = (int(prayer_dt.timestamp()) - int(now.timestamp())) // 60
 
                 label = get_label(prayer_key, lang)
                 reminder_key = f"{user_id}_{today_str}_{prayer_key}_reminder"
@@ -279,17 +282,21 @@ async def evening_summary(bot: Bot):
                     f"Iltimos, quyidagi tugmalar orqali belgilang:"
                 )
 
-            # Har bir belgilanmagan namoz uchun alohida tugma
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             buttons = []
             for p in unanswered:
                 lbl = get_label(p, lang)
-                prayed_text = f"✅ {lbl}" + (" — прочитал" if lang == "ru" else " — o'qidim")
-                qaza_text   = f"❌ {lbl}" + (" — пропустил" if lang == "ru" else " — qoldirdim")
+                # Standart holatda hali belgilanmagan (❌)
+                btn_text = f"❌ {lbl}"
                 buttons.append([
-                    InlineKeyboardButton(text=prayed_text, callback_data=f"prayed_{p}_{today_str}"),
-                    InlineKeyboardButton(text=qaza_text,   callback_data=f"qaza_{p}_{today_str}"),
+                    InlineKeyboardButton(text=btn_text, callback_data=f"tgl_{p}_{today_str}")
                 ])
+            
+            # Saqlash tugmasi
+            save_text = "💾 Сохранить" if lang == "ru" else "💾 Saqlash"
+            buttons.append([
+                InlineKeyboardButton(text=save_text, callback_data=f"save_evening_{today_str}")
+            ])
 
             await bot.send_message(
                 user_id, text,
@@ -327,10 +334,10 @@ async def midnight_qaza_mark(bot: Bot):
 def start_scheduler(bot: Bot):
     """Fon vazifalarini ishga tushirish."""
 
-    # Ertalabki namoz vaqtlari hisoboti (05:00 UTC = 10:00 UZT)
+    # Ertalabki namoz vaqtlari hisoboti (05:00 UZT)
     scheduler.add_job(
         send_daily_report,
-        CronTrigger(hour=5, minute=0),
+        CronTrigger(hour=5, minute=0, timezone=UZ_TZ),
         args=[bot],
         id="daily_report",
         replace_existing=True,
@@ -346,19 +353,19 @@ def start_scheduler(bot: Bot):
         replace_existing=True,
     )
 
-    # Soat 22:00 UZT (17:00 UTC) da kechki xulosa
+    # Soat 22:00 UZT da kechki xulosa
     scheduler.add_job(
         evening_summary,
-        CronTrigger(hour=17, minute=0),
+        CronTrigger(hour=22, minute=0, timezone=UZ_TZ),
         args=[bot],
         id="evening_summary",
         replace_existing=True,
     )
 
-    # Yarim tun 00:00 UZT (19:00 UTC) da avtomatik qaza belgilash
+    # Yarim tun 23:59 UZT da avtomatik qaza belgilash
     scheduler.add_job(
         midnight_qaza_mark,
-        CronTrigger(hour=19, minute=0),
+        CronTrigger(hour=23, minute=59, timezone=UZ_TZ),
         args=[bot],
         id="midnight_qaza",
         replace_existing=True,

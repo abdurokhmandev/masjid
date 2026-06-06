@@ -432,3 +432,47 @@ async def clear_old_notifications(days: int = 2):
             (days,)
         )
         await db.commit()
+
+# ──────────────────────────────────────────────
+# O'tgan kunlardagi hisobotlar tekshiruvi
+# ──────────────────────────────────────────────
+
+async def get_users_missing_reports(days_back: int = 3) -> dict:
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    
+    missing = {}
+    uz_tz = ZoneInfo("Asia/Tashkent")
+    today = datetime.now(uz_tz).date()
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM users WHERE is_banned = 0 AND latitude IS NOT NULL") as cur:
+            users = [r[0] for r in await cur.fetchall()]
+            
+        for uid in users:
+            async with db.execute("SELECT MIN(date_str) FROM prayer_logs WHERE user_id = ?", (uid,)) as cur:
+                row = await cur.fetchone()
+                if not row or not row[0]:
+                    continue
+                earliest_date_str = row[0]
+                
+            dates_to_check = []
+            # days_back=3: bugundan oldingi 1, 2, 3 -kunlar
+            for i in range(1, days_back + 1):
+                d = today - timedelta(days=i)
+                d_str = d.strftime("%Y-%m-%d")
+                if d_str >= earliest_date_str:
+                    dates_to_check.append(d_str)
+            
+            user_missing = []
+            for d_str in dates_to_check:
+                # O'qilgan (prayed) namozlar soni tekshiriladi
+                async with db.execute("SELECT COUNT(*) FROM prayer_logs WHERE user_id = ? AND date_str = ? AND status = 'prayed'", (uid, d_str)) as cur:
+                    c_row = await cur.fetchone()
+                    if not c_row or c_row[0] == 0:
+                        user_missing.append(d_str)
+            
+            if user_missing:
+                missing[uid] = user_missing
+                
+    return missing
