@@ -219,14 +219,42 @@ async def get_all_users() -> list[int]:
             rows = await cur.fetchall()
             return [r[0] for r in rows]
 
-async def get_all_users_with_info() -> list:
-    """Admin panel uchun — oxirgi 50 ta foydalanuvchi."""
+async def get_all_users_for_admin() -> list:
+    """Admin panel uchun barcha foydalanuvchilar (Paginatsiya uchun)."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT user_id, username, full_name, latitude, longitude, is_banned, last_active "
-            "FROM users ORDER BY rowid DESC LIMIT 50"
+            "SELECT user_id, username, full_name, is_banned "
+            "FROM users ORDER BY rowid DESC"
         ) as cur:
             return list(await cur.fetchall())
+
+async def get_user_full_info(user_id: int) -> dict:
+    info = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT full_name, username, last_active, is_banned "
+            "FROM users WHERE user_id = ?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if row:
+                info['full_name'] = row[0]
+                info['username'] = row[1]
+                info['last_active'] = row[2]
+                info['is_banned'] = row[3]
+            else:
+                return None
+                
+        async with db.execute(
+            "SELECT MIN(date_str) FROM prayer_logs WHERE user_id = ?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            info['first_active'] = row[0] if row and row[0] else "Mavjud emas"
+            
+    stats = await get_qaza_statistics(user_id)
+    info['total_prayed'] = stats.get('total_prayed', 0)
+    info['total_qaza'] = stats.get('total_qaza', 0)
+    
+    return info
 
 async def ban_user(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:

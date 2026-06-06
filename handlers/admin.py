@@ -96,57 +96,145 @@ async def adm_stats(callback: types.CallbackQuery):
     await callback.answer()
 
 # ──────────────────────────────────────────────
-# Foydalanuvchilar ro'yxati
+# Foydalanuvchilar ro'yxati (Paginatsiya bilan)
 # ──────────────────────────────────────────────
 
 @router.callback_query(F.data == "adm_users", F.from_user.id == ADMIN_ID)
-async def adm_users(callback: types.CallbackQuery):
-    users = await db.get_all_users_with_info()
+async def adm_users_first_page(callback: types.CallbackQuery):
+    await _show_users_page(callback, page=1)
+
+@router.callback_query(F.data.startswith("adm_users_page_"), F.from_user.id == ADMIN_ID)
+async def adm_users_page(callback: types.CallbackQuery):
+    page = int(callback.data.replace("adm_users_page_", ""))
+    await _show_users_page(callback, page=page)
+
+async def _show_users_page(callback: types.CallbackQuery, page: int):
+    users = await db.get_all_users_for_admin()
     if not users:
         await callback.answer("❌ Foydalanuvchilar yo'q", show_alert=True)
         return
 
-    shown = users[:15]
-    text = f"👥 <b>Foydalanuvchilar ro'yxati</b> (oxirgi {len(shown)} ta)\n━━━━━━━━━━━━━━━━━━━━\n"
-
+    PER_PAGE = 10
+    total_users = len(users)
+    total_pages = (total_users + PER_PAGE - 1) // PER_PAGE
+    
+    if page < 1: page = 1
+    if page > total_pages: page = total_pages
+    
+    start_idx = (page - 1) * PER_PAGE
+    end_idx = start_idx + PER_PAGE
+    shown = users[start_idx:end_idx]
+    
+    text = (
+        f"👥 <b>Foydalanuvchilar ro'yxati</b>\n"
+        f"Jami: {total_users} ta (Sahifa {page}/{total_pages})\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Batafsil ma'lumot uchun ism ustiga bosing:"
+    )
+    
     kb_rows = []
     for user in shown:
-        uid, username, full_name, lat, lon, is_banned, last_active = user
-        status = "⛔" if is_banned else ("📍" if lat else "👤")
+        uid, username, full_name, is_banned = user
+        status = "⛔" if is_banned else "👤"
         name = full_name or (f"@{username}" if username else str(uid))
-        last = last_active[:10] if last_active else "—"
-        text += f"{status} <b>{name[:18]}</b> <code>[{uid}]</code> · {last}\n"
+        
+        btn_text = f"{status} {name}"
+        # Callback data uzunligi chegarasidan chiqmasligi uchun qisqa yozamiz
+        kb_rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"adm_usr_{uid}_{page}")])
 
-        action_text = "✅ Unban" if is_banned else "⛔ Ban"
-        action_cb   = f"adm_unban_{uid}" if is_banned else f"adm_ban_{uid}"
-        kb_rows.append([
-            InlineKeyboardButton(text=f"{status} {name[:14]}", callback_data="adm_noop"),
-            InlineKeyboardButton(text=action_text, callback_data=action_cb),
-        ])
+    # Paginatsiya tugmalari
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"adm_users_page_{page-1}"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"adm_users_page_{page+1}"))
+        
+    if nav_row:
+        kb_rows.append(nav_row)
+        
+    kb_rows.append([InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="adm_back")])
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await callback.answer()
 
-    kb_rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="adm_back")])
-    await callback.message.edit_text(
-        text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+# ──────────────────────────────────────────────
+# Foydalanuvchi profili
+# ──────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("adm_usr_"), F.from_user.id == ADMIN_ID)
+async def adm_user_profile(callback: types.CallbackQuery):
+    # data = adm_usr_{uid}_{page}
+    parts = callback.data.split("_")
+    uid = int(parts[2])
+    page = int(parts[3])
+    
+    info = await db.get_user_full_info(uid)
+    if not info:
+        await callback.answer("❌ Foydalanuvchi topilmadi!", show_alert=True)
+        return
+        
+    full_name = info.get('full_name') or "Kiritilmagan"
+    username = f"@{info.get('username')}" if info.get('username') else "Mavjud emas"
+    first_active = info.get('first_active')
+    last_active = info.get('last_active') or "Noma'lum"
+    is_banned = info.get('is_banned', 0)
+    
+    total_p = info.get('total_prayed', 0)
+    total_q = info.get('total_qaza', 0)
+    
+    status_text = "⛔ Bloklangan" if is_banned else "✅ Faol"
+    
+    text = (
+        f"👤 <b>Foydalanuvchi profili</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Ismi:</b> {full_name}\n"
+        f"<b>ID:</b> <code>{uid}</code>\n"
+        f"<b>Username:</b> {username}\n"
+        f"<b>Status:</b> {status_text}\n\n"
+        f"<b>Ilk faollik sanasi:</b> {first_active}\n"
+        f"<b>Oxirgi faolligi:</b> {last_active}\n\n"
+        f"📊 <b>Namoz statistikasi:</b>\n"
+        f"✅ O'qilgan: <b>{total_p}</b> ta\n"
+        f"❌ Qazo (qoldirilgan): <b>{total_q}</b> ta\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
     )
+    
+    # Tugmalar
+    url_btn = InlineKeyboardButton(text="🔗 Profilga o'tish", url=f"tg://user?id={uid}")
+    action_text = "✅ Blokdan chiqarish" if is_banned else "⛔ Bloklash (Ban)"
+    action_cb = f"adm_tglban_{uid}_{page}"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [url_btn],
+        [InlineKeyboardButton(text=action_text, callback_data=action_cb)],
+        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"adm_users_page_{page}")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
-@router.callback_query(F.data == "adm_noop", F.from_user.id == ADMIN_ID)
-async def adm_noop(callback: types.CallbackQuery):
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("adm_ban_"), F.from_user.id == ADMIN_ID)
-async def adm_ban(callback: types.CallbackQuery):
-    uid = int(callback.data.replace("adm_ban_", ""))
-    await db.ban_user(uid)
-    await callback.answer(f"⛔ {uid} blocklandi", show_alert=True)
-    await adm_users(callback)
-
-@router.callback_query(F.data.startswith("adm_unban_"), F.from_user.id == ADMIN_ID)
-async def adm_unban(callback: types.CallbackQuery):
-    uid = int(callback.data.replace("adm_unban_", ""))
-    await db.unban_user(uid)
-    await callback.answer(f"✅ {uid} blokdan chiqarildi", show_alert=True)
-    await adm_users(callback)
+@router.callback_query(F.data.startswith("adm_tglban_"), F.from_user.id == ADMIN_ID)
+async def adm_tglban(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    uid = int(parts[2])
+    page = int(parts[3])
+    
+    info = await db.get_user_full_info(uid)
+    if not info:
+        await callback.answer("Topilmadi", show_alert=True)
+        return
+        
+    is_banned = info.get('is_banned', 0)
+    if is_banned:
+        await db.unban_user(uid)
+        await callback.answer(f"✅ {uid} blokdan chiqarildi", show_alert=True)
+    else:
+        await db.ban_user(uid)
+        await callback.answer(f"⛔ {uid} bloklandi", show_alert=True)
+        
+    # Qayta profilni yuklaymiz
+    callback.data = f"adm_usr_{uid}_{page}"
+    await adm_user_profile(callback)
 
 # ──────────────────────────────────────────────
 # Broadcast
