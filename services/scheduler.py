@@ -18,16 +18,7 @@ scheduler = AsyncIOScheduler(timezone=UZ_TZ)
 # Yordamchi funksiyalar
 # ──────────────────────────────────────────────
 
-def _fetch_prayer_times(lat: float, lon: float) -> dict:
-    import requests
-    try:
-        url = f"https://api.aladhan.com/v1/timings?latitude={lat}&longitude={lon}&method=3"
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            return r.json().get("data", {}).get("timings", {})
-    except Exception as e:
-        logging.error(f"[scheduler] API xato: {e}")
-    return {}
+from handlers.prayer import _fetch_prayer_times, get_nearest_region
 
 def _clean_time(raw: str) -> str:
     return raw.split()[0] if raw and " " in raw else (raw or "—")
@@ -72,23 +63,25 @@ async def send_daily_report(bot: Bot):
                 continue
 
             loc = await db.get_user_location(user_id)
-            if not loc:
-                continue
+            region, _, _ = await db.get_user_region(user_id)
+            if loc:
+                lat, lon = loc
+                calc_region = get_nearest_region(lat, lon)
+            else:
+                calc_region = region
 
-            lat, lon = loc
-            coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+            coord_key = calc_region
             utc_offset = await db.get_user_utc_offset(user_id)
             user_tz    = timezone(timedelta(hours=utc_offset))
             today_str  = datetime.now(user_tz).strftime("%Y-%m-%d")
             today_fmt  = datetime.now(user_tz).strftime("%d.%m.%Y")
             lang       = await db.get_user_lang(user_id) or "uz"
-            region, _, _ = await db.get_user_region(user_id)
 
             cached = await db.get_prayer_cache(coord_key, today_str)
             if cached:
                 timings = cached
             else:
-                timings = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+                timings, _ = await asyncio.to_thread(_fetch_prayer_times, calc_region)
                 if timings:
                     await db.upsert_prayer_cache(coord_key, today_str, timings)
                 else:
@@ -151,19 +144,22 @@ async def reminder_checker(bot: Bot):
             lang = await db.get_user_lang(user_id) or "uz"
 
             loc = await db.get_user_location(user_id)
-            if not loc:
-                continue
+            region, _, _ = await db.get_user_region(user_id)
+            if loc:
+                lat, lon = loc
+                calc_region = get_nearest_region(lat, lon)
+            else:
+                calc_region = region
 
-            lat, lon = loc
             utc_offset = await db.get_user_utc_offset(user_id)
             user_tz    = timezone(timedelta(hours=utc_offset))
             now        = datetime.now(user_tz)
             today_str  = now.strftime("%Y-%m-%d")
 
-            coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+            coord_key = calc_region
             cached = await db.get_prayer_cache(coord_key, today_str)
             if not cached:
-                cached = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+                cached, _ = await asyncio.to_thread(_fetch_prayer_times, calc_region)
                 if cached:
                     await db.upsert_prayer_cache(coord_key, today_str, cached)
                 else:

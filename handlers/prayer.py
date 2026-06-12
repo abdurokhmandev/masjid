@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import requests
+import math
 from datetime import datetime, timezone, timedelta
 from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -55,17 +56,50 @@ REGIONS = [
 # API
 # ──────────────────────────────────────────────
 
-def _fetch_prayer_times(lat: float, lon: float) -> tuple[dict, dict]:
-    """Aladhan API dan namoz vaqtlarini olish."""
+REGION_API_MAP = {
+    "Toshkent": "toshkent",
+    "Samarqand": "samarqand",
+    "Buxoro": "buxoro",
+    "Andijon": "andijon",
+    "Namangan": "namangan",
+    "Farg'ona": "fargona",
+    "Qashqadaryo": "qarshi",
+    "Surxondaryo": "termiz",
+    "Xorazm": "xiva",
+    "Navoiy": "navoiy",
+    "Jizzax": "jizzax",
+    "Sirdaryo": "guliston",
+    "Qoraqalpog'iston": "nukus",
+}
+
+def get_nearest_region(lat: float, lon: float) -> str:
+    best_region = "Toshkent"
+    min_dist = float('inf')
+    for name, r_lat, r_lon in REGIONS:
+        dist = math.hypot(lat - r_lat, lon - r_lon)
+        if dist < min_dist:
+            min_dist = dist
+            best_region = name
+    return best_region
+
+def _fetch_prayer_times(region_name: str) -> tuple[dict, dict]:
+    """NamozAPI dan namoz vaqtlarini olish."""
+    api_id = REGION_API_MAP.get(region_name, "toshkent")
     try:
-        url = (
-            f"https://api.aladhan.com/v1/timings"
-            f"?latitude={lat}&longitude={lon}&method=3"
-        )
+        url = f"https://namozapi.uz/namoz/{api_id}"
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
-            data = r.json().get("data", {})
-            return data.get("timings", {}), data.get("meta", {})
+            data = r.json()
+            timings = {
+                "Fajr": data.get("bomdod"),
+                "Sunrise": data.get("quyosh"),
+                "Dhuhr": data.get("peshin"),
+                "Asr": data.get("asr"),
+                "Maghrib": data.get("shom"),
+                "Isha": data.get("xufton"),
+            }
+            meta = {"timezone": "Asia/Tashkent"}
+            return timings, meta
     except Exception as e:
         logging.error(f"[prayer] API xato: {e}")
     return {}, {}
@@ -162,22 +196,24 @@ async def _handle_prayer(message: types.Message, fallback_lang: str):
     if location:
         lat, lon = location
         source = "📍 Joylashuvingiz asosida" if lang == "uz" else "📍 По вашей геолокации"
+        calc_region = get_nearest_region(lat, lon)
     else:
         lat, lon = reg_lat, reg_lon
         source = f"🗺 {region} hududi asosida" if lang == "uz" else f"🗺 По региону {region}"
+        calc_region = region
 
     wait_msg = await message.answer(
         "⏳ Namoz vaqtlari yuklanmoqda..." if lang == "uz" else "⏳ Загрузка времени намаза..."
     )
 
-    coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+    coord_key = calc_region
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
     cached    = await db.get_prayer_cache(coord_key, today_str)
 
     if cached:
         timings = cached
     else:
-        timings, meta = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+        timings, meta = await asyncio.to_thread(_fetch_prayer_times, calc_region)
         if not timings:
             await wait_msg.edit_text(
                 "❌ Namoz vaqtlarini olishda xatolik yuz berdi.\nIltimos, qayta urinib ko'ring." if lang == "uz" else
@@ -189,13 +225,11 @@ async def _handle_prayer(message: types.Message, fallback_lang: str):
         # UTC offset ni saqlash
         if location:
             try:
-                tz_str = meta.get("timezone", "")
-                if tz_str:
-                    import zoneinfo
-                    tz = zoneinfo.ZoneInfo(tz_str)
-                    offset_seconds = datetime.now(tz).utcoffset().total_seconds()
-                    offset_hours   = int(offset_seconds // 3600)
-                    await db.set_utc_offset(user_id, offset_hours)
+                import zoneinfo
+                tz = zoneinfo.ZoneInfo("Asia/Tashkent")
+                offset_seconds = datetime.now(tz).utcoffset().total_seconds()
+                offset_hours   = int(offset_seconds // 3600)
+                await db.set_utc_offset(user_id, offset_hours)
             except Exception:
                 pass
 
@@ -244,14 +278,14 @@ async def set_prayer_region(callback: types.CallbackQuery):
     loading = "⏳ Vaqtlar yuklanmoqda..." if lang == "uz" else "⏳ Загрузка времени..."
     await callback.message.edit_text(loading)
 
-    coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+    coord_key = name
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
     cached    = await db.get_prayer_cache(coord_key, today_str)
 
     if cached:
         timings = cached
     else:
-        timings, _ = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+        timings, _ = await asyncio.to_thread(_fetch_prayer_times, name)
         if timings:
             await db.upsert_prayer_cache(coord_key, today_str, timings)
 
@@ -278,16 +312,18 @@ async def prayer_region_back(callback: types.CallbackQuery):
         lat, lon = location
         source   = "📍 Joylashuvingiz asosida" if lang == "uz" else "📍 По вашей геолокации"
         show_region = "Joylashuvingiz" if lang == "uz" else "Ваша геолокация"
+        calc_region = get_nearest_region(lat, lon)
     else:
         lat, lon   = reg_lat, reg_lon
         source     = f"🗺 {region} hududi asosida" if lang == "uz" else f"🗺 По региону {region}"
         show_region = region
+        calc_region = region
 
-    coord_key = f"{round(lat, 5)},{round(lon, 5)}"
+    coord_key = calc_region
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
     cached    = await db.get_prayer_cache(coord_key, today_str)
     if not cached:
-        timings, _ = await asyncio.to_thread(_fetch_prayer_times, lat, lon)
+        timings, _ = await asyncio.to_thread(_fetch_prayer_times, calc_region)
         if timings:
             await db.upsert_prayer_cache(coord_key, today_str, timings)
         else:
